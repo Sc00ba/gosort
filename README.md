@@ -13,6 +13,11 @@ something from it, too.
 
 ![Architecture Diagram](docs/arch_1.png)
 
+## Next Steps
+- Decouple the writing of tmp files from the sorter
+- Introduce a strategy for when the sorted data fits completely into memory
+- Investigate using a sync pool to relieve GC pressure
+
 ## ⚖️ License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
