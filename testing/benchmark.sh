@@ -15,7 +15,7 @@ USE_GO_MEM_LIMIT=false
 for i in "$@"
 do
 case $i in
-    --buffer-size=*)
+    --buffer-size-mb=*)
     BUFFER_SIZE_MB="${i#*=}"
     shift
     ;;
