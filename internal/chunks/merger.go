@@ -28,9 +28,8 @@ func NewMerger(ctx context.Context, chunks <-chan [][]byte, out io.Writer, thres
 	return errs, nil
 }
 
-// Merge performs a K-way merge on the sorted chunks and will use temporary files if the given
-// threshold is exceeded.
-func Merge(ctx context.Context, chunks <-chan [][]byte, out io.Writer, threshold int, options ...mergeOption) error {
+// Merge performs a K-way merge on the sorted chunks and will merge chunks in memory until the merge factor is reached.
+func Merge(ctx context.Context, chunks <-chan [][]byte, out io.Writer, mergeFactor int, options ...mergeOption) error {
 	var tmpFiles []*os.File
 	defer func() {
 		for _, file := range tmpFiles {
@@ -40,7 +39,7 @@ func Merge(ctx context.Context, chunks <-chan [][]byte, out io.Writer, threshold
 	}()
 
 	dir := "/tmp"
-	batch := make([][][]byte, 0, threshold)
+	batch := make([][][]byte, 0, mergeFactor)
 	run := true
 	for run {
 		select {
@@ -51,7 +50,7 @@ func Merge(ctx context.Context, chunks <-chan [][]byte, out io.Writer, threshold
 				run = false
 				break
 			}
-			if len(batch) < threshold {
+			if len(batch) < mergeFactor {
 				batch = append(batch, chunk)
 			} else {
 				tmpFile, err := os.CreateTemp(dir, "gosort")
@@ -71,7 +70,7 @@ func Merge(ctx context.Context, chunks <-chan [][]byte, out io.Writer, threshold
 				}
 
 				tmpFiles = append(tmpFiles, tmpFile)
-				batch = make([][][]byte, 0, threshold)
+				batch = make([][][]byte, 0, mergeFactor)
 				batch = append(batch, chunk)
 			}
 		}

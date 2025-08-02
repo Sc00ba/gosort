@@ -109,7 +109,8 @@ func runSort(outFileArg *string, bufferSizeArg *uint, parallel *uint) {
 		log.Fatalf("error while creating sorter (%s)", err)
 	}
 
-	mergeErrs, err := chunks.NewMerger(ctx, sortedChunksChan, outFile, 100)
+	mergeFactor := 100
+	mergeErrs, err := chunks.NewMerger(ctx, sortedChunksChan, outFile, mergeFactor)
 	if err != nil {
 		log.Fatalf("error while creating merger (%s)", err)
 	}
