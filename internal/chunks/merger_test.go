@@ -3,7 +3,6 @@ package chunks
 import (
 	"bytes"
 	"context"
-	"io"
 	"sort"
 	"strings"
 	"testing"
@@ -74,16 +73,25 @@ func TestMerge(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			var readers []io.Reader
+			chunks := make(chan [][]byte, len(tc.inputs))
 			var allInputLines []string
 
 			for _, inputStr := range tc.inputs {
-				readers = append(readers, strings.NewReader(inputStr))
+				// TODO: Clean up this block
+				if inputStr != "" {
+					var chunk [][]byte
+					for str := range strings.SplitSeq(inputStr, "\n") {
+						chunk = append(chunk, []byte(str))
+					}
+					chunks <- chunk
+				}
+
 				if inputStr != "" {
 					lines := strings.Split(inputStr, "\n")
 					allInputLines = append(allInputLines, lines...)
 				}
 			}
+			close(chunks)
 
 			sort.Strings(allInputLines)
 			expectedOutput := strings.Join(allInputLines, "\n")
@@ -92,7 +100,7 @@ func TestMerge(t *testing.T) {
 			}
 
 			var outputBuffer bytes.Buffer
-			err := Merge(ctx, readers, &outputBuffer)
+			err := Merge(ctx, chunks, &outputBuffer, 100)
 
 			assert.NoError(t, err, "Merge function returned an unexpected error")
 			assert.Equal(t, expectedOutput, outputBuffer.String(), "The merged output does not match the expected sorted output")

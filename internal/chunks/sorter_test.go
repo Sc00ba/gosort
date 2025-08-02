@@ -1,9 +1,7 @@
 package chunks
 
 import (
-	"bufio"
 	"context"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -89,7 +87,7 @@ func TestNewSorter(t *testing.T) {
 			ctx := context.Background()
 			chunksIn := make(chan [][]byte, len(tc.inputChunks))
 
-			tmpFilesChan, errs, err := NewSorter(ctx, tc.numSorters, chunksIn)
+			sortedChunks, errs, err := NewSorter(ctx, tc.numSorters, chunksIn)
 			assert.NoError(t, err, "NewSorter should not return an immediate error")
 
 			go func() {
@@ -102,17 +100,6 @@ func TestNewSorter(t *testing.T) {
 			var wg sync.WaitGroup
 			wg.Add(2)
 
-			var tmpFiles []string
-			go func() {
-				defer wg.Done()
-				for f := range tmpFilesChan {
-					tmpFiles = append(tmpFiles, f)
-					t.Cleanup(func() {
-						os.Remove(f)
-					})
-				}
-			}()
-
 			var receivedErr error
 			go func() {
 				defer wg.Done()
@@ -120,6 +107,18 @@ func TestNewSorter(t *testing.T) {
 					if err != nil {
 						receivedErr = err
 					}
+				}
+			}()
+
+			var actualSortedChunks [][]string
+			go func() {
+				defer wg.Done()
+				for chunk := range sortedChunks {
+					var strChunk []string
+					for _, tokenBytes := range chunk {
+						strChunk = append(strChunk, string(tokenBytes))
+					}
+					actualSortedChunks = append(actualSortedChunks, strChunk)
 				}
 			}()
 
@@ -131,7 +130,6 @@ func TestNewSorter(t *testing.T) {
 			}
 
 			assert.NoError(t, receivedErr, "Received an unexpected error")
-			assert.Equal(t, len(tc.inputChunks), len(tmpFiles), "Should have one output file per input chunk")
 
 			var expectedSortedChunks [][]string
 			for _, chunk := range tc.inputChunks {
@@ -141,19 +139,6 @@ func TestNewSorter(t *testing.T) {
 				}
 				sort.Strings(stringChunk)
 				expectedSortedChunks = append(expectedSortedChunks, stringChunk)
-			}
-
-			var actualSortedChunks [][]string
-			for _, fileName := range tmpFiles {
-				file, err := os.Open(fileName)
-				assert.NoError(t, err, "Failed to open temp file for verification")
-				var lines []string
-				scanner := bufio.NewScanner(file)
-				for scanner.Scan() {
-					lines = append(lines, scanner.Text())
-				}
-				file.Close()
-				actualSortedChunks = append(actualSortedChunks, lines)
 			}
 
 			sort.Slice(expectedSortedChunks, func(i, j int) bool {

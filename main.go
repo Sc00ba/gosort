@@ -104,12 +104,16 @@ func runSort(outFileArg *string, bufferSizeArg *uint, parallel *uint) {
 		log.Fatalf("error while creating chunker (%s)", err)
 	}
 
-	chunkFiles, sortErrs, err := chunks.NewSorter(ctx, int(numSorters), chunksChan)
+	sortedChunksChan, sortErrs, err := chunks.NewSorter(ctx, int(numSorters), chunksChan)
 	if err != nil {
 		log.Fatalf("error while creating sorter (%s)", err)
 	}
 
-	readers = make([]io.Reader, 0, len(readers))
+	mergeErrs, err := chunks.NewMerger(ctx, sortedChunksChan, outFile, 100)
+	if err != nil {
+		log.Fatalf("error while creating merger (%s)", err)
+	}
+
 	run := true
 	for run {
 		select {
@@ -121,24 +125,12 @@ func runSort(outFileArg *string, bufferSizeArg *uint, parallel *uint) {
 			if ok {
 				log.Fatal(err)
 			}
-		case fileName, ok := <-chunkFiles:
-			if !ok {
+		case err, ok := <-mergeErrs:
+			if ok {
+				log.Fatal(err)
+			} else {
 				run = false
-				break
 			}
-
-			file, err := os.Open(fileName)
-			if err != nil {
-				log.Fatalf("error while opening tmp file (%s)", err)
-			}
-
-			openedFiles = append(openedFiles, file)
-			readers = append(readers, file)
 		}
-	}
-
-	err = chunks.Merge(ctx, readers, outFile)
-	if err != nil {
-		log.Fatal(err)
 	}
 }

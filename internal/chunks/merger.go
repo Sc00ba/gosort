@@ -5,8 +5,8 @@ import (
 	"bytes"
 	"container/heap"
 	"context"
-	"fmt"
 	"io"
+	"os"
 )
 
 type mergeOptions struct {
@@ -15,44 +15,167 @@ type mergeOptions struct {
 
 type mergeOption func(opts *mergeOptions)
 
-// Merge performs a K-way merge on the given token readers where tokens are separated by newlines.
-// Readers are expected to output tokens in a lexicographic order. The default order is ascending.
-func Merge(ctx context.Context, readers []io.Reader, out io.Writer, options ...mergeOption) error {
-	writer := bufio.NewWriter(out)
+func NewMerger(ctx context.Context, chunks <-chan [][]byte, out io.Writer, threshold int, options ...mergeOption) (<-chan error, error) {
+	errs := make(chan error, 1)
+	go func() {
+		defer close(errs)
+		err := Merge(ctx, chunks, out, threshold, options...)
+		if err != nil {
+			errs <- err
+		}
+	}()
 
-	var scanners []*bufio.Scanner
-	for _, reader := range readers {
-		scanners = append(scanners, bufio.NewScanner(reader))
-	}
+	return errs, nil
+}
 
-	mergeHeap := make(mergeHeap, 0, len(scanners))
-	for idx, scanner := range scanners {
+// Merge performs a K-way merge on the sorted chunks and will use temporary files if the given
+// threshold is exceeded.
+func Merge(ctx context.Context, chunks <-chan [][]byte, out io.Writer, threshold int, options ...mergeOption) error {
+	var tmpFiles []*os.File
+	defer func() {
+		for _, file := range tmpFiles {
+			file.Close()
+			os.Remove(file.Name())
+		}
+	}()
+
+	dir := "/tmp"
+	batch := make([][][]byte, 0, threshold)
+	run := true
+	for run {
 		select {
 		case <-ctx.Done():
-			return nil
-		default:
-			if scanner.Scan() {
-				token := make([]byte, len(scanner.Bytes()))
-				copy(token, scanner.Bytes())
-				heap.Push(&mergeHeap, mergeStep{srcIdx: idx, token: token})
+			return ctx.Err()
+		case chunk, ok := <-chunks:
+			if !ok {
+				run = false
+				break
 			}
+			if len(batch) < threshold {
+				batch = append(batch, chunk)
+			} else {
+				tmpFile, err := os.CreateTemp(dir, "gosort")
+				if err != nil {
+					return err
+				}
+
+				writer := bufio.NewWriter(tmpFile)
+				err = mergeBatchToWriter(ctx, batch, writer)
+				if err != nil {
+					return err
+				}
+
+				err = writer.Flush()
+				if err != nil {
+					return err
+				}
+
+				tmpFiles = append(tmpFiles, tmpFile)
+				batch = make([][][]byte, 0, threshold)
+				batch = append(batch, chunk)
+			}
+		}
+	}
+
+	if len(tmpFiles) > 0 {
+		tmpFile, err := os.CreateTemp(dir, "gosort")
+		if err != nil {
+			return err
+		}
+
+		err = mergeBatchToWriter(ctx, batch, tmpFile)
+		if err != nil {
+			return err
+		}
+
+		tmpFiles = append(tmpFiles, tmpFile)
+
+		err = mergeFilesToWriter(ctx, tmpFiles, out)
+		if err != nil {
+			return err
+		}
+	} else {
+		err := mergeBatchToWriter(ctx, batch, out)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func mergeBatchToWriter(ctx context.Context, batch [][][]byte, writer io.Writer) error {
+	mergeHeap := make(mergeHeap, 0, len(batch))
+	for i := range batch {
+		heap.Push(
+			&mergeHeap,
+			mergeStep{
+				srcIdx:   i,
+				tokenIdx: 0,
+				token:    batch[i][0],
+			})
+	}
+
+	for mergeHeap.Len() > 0 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			mergeStep := heap.Pop(&mergeHeap).(mergeStep)
+			_, err := writer.Write(mergeStep.token)
+			if err != nil {
+				return err
+			}
+
+			_, err = writer.Write([]byte{'\n'})
+			if err != nil {
+				return err
+			}
+
+			mergeStep.tokenIdx++
+			if mergeStep.tokenIdx < len(batch[mergeStep.srcIdx]) {
+				mergeStep.token = batch[mergeStep.srcIdx][mergeStep.tokenIdx]
+				heap.Push(&mergeHeap, mergeStep)
+			}
+		}
+	}
+
+	return nil
+}
+
+func mergeFilesToWriter(ctx context.Context, files []*os.File, writer io.Writer) error {
+	scanners := make([]*bufio.Scanner, len(files))
+	mergeHeap := make(mergeHeap, 0, len(files))
+	for i := range files {
+		scanner := bufio.NewScanner(files[i])
+		scanners[i] = scanner
+
+		if scanners[i].Scan() {
+			token := make([]byte, len(scanner.Bytes()))
+			copy(token, scanner.Bytes())
+			heap.Push(
+				&mergeHeap,
+				mergeStep{
+					srcIdx: i,
+					token:  token,
+				})
 		}
 	}
 
 	for mergeHeap.Len() > 0 {
 		select {
 		case <-ctx.Done():
-			return nil
+			return ctx.Err()
 		default:
 			mergeStep := heap.Pop(&mergeHeap).(mergeStep)
 			_, err := writer.Write(mergeStep.token)
 			if err != nil {
-				return fmt.Errorf("failed to write token (%w)", err)
+				return err
 			}
 
-			err = writer.WriteByte('\n')
+			_, err = writer.Write([]byte{'\n'})
 			if err != nil {
-				return fmt.Errorf("failed to write newline (%w)", err)
+				return err
 			}
 
 			scanner := scanners[mergeStep.srcIdx]
@@ -65,12 +188,13 @@ func Merge(ctx context.Context, readers []io.Reader, out io.Writer, options ...m
 		}
 	}
 
-	return writer.Flush()
+	return nil
 }
 
 type mergeStep struct {
-	srcIdx int
-	token  []byte
+	srcIdx   int
+	tokenIdx int
+	token    []byte
 }
 
 type mergeHeap []mergeStep
