@@ -18,7 +18,6 @@ type sorterOption func(options *sorterOptions)
 // Any errors that occur during the sorting process will be sent on the returned errs channel.
 func NewSorter(ctx context.Context, numSorters int, chunks <-chan [][]byte, options ...sorterOption) (<-chan [][]byte, <-chan error, error) {
 	wg := &sync.WaitGroup{}
-
 	out := make(chan [][]byte)
 	errs := make(chan error, 1)
 	for range numSorters {
@@ -29,6 +28,7 @@ func NewSorter(ctx context.Context, numSorters int, chunks <-chan [][]byte, opti
 			for {
 				select {
 				case <-ctx.Done():
+					errs <- ctx.Err()
 					return
 				case chunk, ok := <-chunks:
 					if !ok {
@@ -39,17 +39,20 @@ func NewSorter(ctx context.Context, numSorters int, chunks <-chan [][]byte, opti
 						return bytes.Compare(chunk[i], chunk[j]) < 0
 					})
 
-					out <- chunk
+					if err := send(ctx, out, chunk); err != nil {
+						errs <- err
+						return
+					}
 				}
 			}
 		}(chunks, out, errs)
 	}
 
-	go func(out chan [][]byte, errs chan error) {
+	go func() {
 		wg.Wait()
 		close(out)
 		close(errs)
-	}(out, errs)
+	}()
 
 	return out, errs, nil
 }

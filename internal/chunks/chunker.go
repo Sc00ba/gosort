@@ -30,6 +30,7 @@ func NewChunker(ctx context.Context, chunkSize, bufferSize uint, readers ...io.R
 			for scanner.Scan() {
 				select {
 				case <-ctx.Done():
+					errs <- ctx.Err()
 					return
 				default:
 					token := make([]byte, len(scanner.Bytes()))
@@ -44,7 +45,10 @@ func NewChunker(ctx context.Context, chunkSize, bufferSize uint, readers ...io.R
 						chunk = append(chunk, token)
 						currentSize += tokenSize
 					} else {
-						out <- chunk
+						if err := send(ctx, out, chunk); err != nil {
+							errs <- err
+							return
+						}
 						chunk = make([][]byte, 0, chunkAllocation)
 						chunk = append(chunk, token)
 						currentSize = tokenSize
@@ -53,16 +57,19 @@ func NewChunker(ctx context.Context, chunkSize, bufferSize uint, readers ...io.R
 			}
 
 			if len(chunk) > 0 {
-				out <- chunk
+				if err := send(ctx, out, chunk); err != nil {
+					errs <- err
+					return
+				}
 			}
 		}
 	}(readers, out)
 
-	go func(out chan<- [][]byte, errs chan error) {
+	go func() {
 		wg.Wait()
 		close(out)
 		close(errs)
-	}(out, errs)
+	}()
 
 	return out, errs, nil
 }

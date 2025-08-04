@@ -7,9 +7,11 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/signal"
 	"runtime"
 	"runtime/pprof"
 	"sync"
+	"syscall"
 
 	"golang.org/x/sys/unix"
 )
@@ -46,6 +48,12 @@ func main() {
 }
 
 func runSort(outFileArg *string, bufferSizeArg *uint, parallel *uint) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	var openedFiles []*os.File
 	defer func() {
 		for _, file := range openedFiles {
@@ -102,9 +110,6 @@ func runSort(outFileArg *string, bufferSizeArg *uint, parallel *uint) {
 		log.Printf("Stdin is the only input file currently supported")
 		return
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	var wg sync.WaitGroup
 
