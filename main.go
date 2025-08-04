@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"gosort/internal/chunks"
@@ -76,6 +77,9 @@ func runSort(outFileArg *string, bufferSizeArg *uint, parallel *uint) {
 		openedFiles = append(openedFiles, outFile)
 	}
 
+	outWriter := bufio.NewWriter(outFile)
+	defer outWriter.Flush()
+
 	var info unix.Sysinfo_t
 	err := unix.Sysinfo(&info)
 	if err != nil {
@@ -147,7 +151,7 @@ func runSort(outFileArg *string, bufferSizeArg *uint, parallel *uint) {
 	}()
 
 	mergeFactor := 100
-	mergeErrs, err := chunks.NewMerger(ctx, sortedChunksChan, outFile, mergeFactor)
+	mergeErrs, err := chunks.NewMerger(ctx, sortedChunksChan, outWriter, mergeFactor)
 	if err != nil {
 		cancel()
 		log.Printf("Error while creating merger (%s)", err)

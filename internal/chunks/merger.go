@@ -82,12 +82,25 @@ func Merge(ctx context.Context, chunks <-chan [][]byte, out io.Writer, mergeFact
 			return err
 		}
 
-		err = mergeBatchToWriter(ctx, batch, tmpFile)
+		writer := bufio.NewWriter(tmpFile)
+		err = mergeBatchToWriter(ctx, batch, writer)
+		if err != nil {
+			return err
+		}
+
+		err = writer.Flush()
 		if err != nil {
 			return err
 		}
 
 		tmpFiles = append(tmpFiles, tmpFile)
+
+		for _, file := range tmpFiles {
+			_, err := file.Seek(0, io.SeekStart)
+			if err != nil {
+				return err
+			}
+		}
 
 		err = mergeFilesToWriter(ctx, tmpFiles, out)
 		if err != nil {
