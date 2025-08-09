@@ -23,8 +23,11 @@ func NewChunker(ctx context.Context, chunkSize, bufferSize uint, readers ...io.R
 	wg.Add(1)
 	go func(readers []io.Reader, out chan<- [][]byte) {
 		defer wg.Done()
+		// add one so token size can equal chunkSize without scanner error.
+		scanBuff := make([]byte, int(chunkSize)+1)
 		for _, reader := range readers {
 			scanner := bufio.NewScanner(reader)
+			scanner.Buffer(scanBuff, len(scanBuff))
 			chunk := make([][]byte, 0, chunkAllocation)
 			var currentSize uint
 			for scanner.Scan() {
@@ -36,11 +39,6 @@ func NewChunker(ctx context.Context, chunkSize, bufferSize uint, readers ...io.R
 					token := make([]byte, len(scanner.Bytes()))
 					copy(token, scanner.Bytes())
 					tokenSize := uint(len(token))
-					if tokenSize > chunkSize {
-						errs <- fmt.Errorf("token size greater than chunk size")
-						return
-					}
-
 					if currentSize+tokenSize <= chunkSize {
 						chunk = append(chunk, token)
 						currentSize += tokenSize
@@ -56,7 +54,7 @@ func NewChunker(ctx context.Context, chunkSize, bufferSize uint, readers ...io.R
 				}
 			}
 			if err := scanner.Err(); err != nil {
-				errs <- err
+				errs <- fmt.Errorf("error encountered while scanning: %w", err)
 				return
 			}
 
