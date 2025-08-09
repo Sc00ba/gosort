@@ -172,6 +172,9 @@ func mergeFilesToWriter(ctx context.Context, files []*os.File, writer io.Writer)
 					token:  token,
 				})
 		}
+		if err := scanners[i].Err(); err != nil {
+			return err
+		}
 	}
 
 	for mergeHeap.Len() > 0 {

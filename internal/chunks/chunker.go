@@ -55,6 +55,10 @@ func NewChunker(ctx context.Context, chunkSize, bufferSize uint, readers ...io.R
 					}
 				}
 			}
+			if err := scanner.Err(); err != nil {
+				errs <- err
+				return
+			}
 
 			if len(chunk) > 0 {
 				if err := send(ctx, out, chunk); err != nil {
