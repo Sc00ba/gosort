@@ -1,5 +1,3 @@
 gosort
-large_file.txt
-sorted_gosort.txt
-sorted_gnu.txt
+*.bmf
 mem.prof
